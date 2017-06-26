@@ -20,7 +20,7 @@ namespace
 
 // Keep the LED on for 2/3 of a second.
 constexpr Timer::ticks_t BLINK_ON_TICKS = 75; //Timer::FREQUENCY_HZ * 3 / 4;
-constexpr Timer::ticks_t BLINK_OFF_TICKS = 100 ;//Timer::FREQUENCY_HZ- BLINK_ON_TICKS;
+constexpr Timer::ticks_t BLINK_OFF_TICKS = 100; //Timer::FREQUENCY_HZ- BLINK_ON_TICKS;
 }
 
 // ----- main() ---------------------------------------------------------------
@@ -32,13 +32,14 @@ constexpr Timer::ticks_t BLINK_OFF_TICKS = 100 ;//Timer::FREQUENCY_HZ- BLINK_ON_
 #pragma GCC diagnostic ignored "-Wmissing-declarations"
 #pragma GCC diagnostic ignored "-Wreturn-type"
 
-uint8_t One[12][3];
-cmdc0de::WS2818 Leds1(GPIO_Pin_7, GPIOA, TIM1, DMA1_Channel2,DMA1_Channel2_IRQn);
+uint8_t One[36];
+cmdc0de::WS2818 Leds1(GPIO_Pin_7, GPIOA, TIM1, DMA1_Channel2, DMA1_Channel2_IRQn);
+cmdc0de::LedBuffer LBuffer(&One[0], 12);
 
 extern "C" {
-	void DMA1_Channel2_IRQHandler() {
-		Leds1.handleISR();
-	}
+void DMA1_Channel2_IRQHandler() {
+	Leds1.handleISR();
+}
 }
 
 int
@@ -65,21 +66,21 @@ main(int argc, char* argv[]) {
 	{
 
 		for (int i = 0; i < 12; i++) {
-			One[i][0] = rand() % 256;
-			One[i][1] = rand() % 256;
-			One[i][2] = rand() % 256;
+			One[i * 3] = rand() % 256;
+			One[i * 3 + 1] = rand() % 256;
+			One[i * 3 + 2] = rand() % 256;
 		}
-		Leds1.sendColors(One, 12);
+		Leds1.sendColors(&LBuffer, 12);
 
 		blinkLed.turnOn();
 		timer.sleep(seconds == 0 ? Timer::FREQUENCY_HZ : BLINK_ON_TICKS);
 
 		for (int i = 0; i < 12; i++) {
-			One[i][0] = rand() % 256;
-			One[i][1] = rand() % 256;
-			One[i][2] = rand() % 256;
+			One[i * 3] = rand() % 256;
+			One[i * 3 + 1] = rand() % 256;
+			One[i * 3 + 2] = rand() % 256;
 		}
-		Leds1.sendColors(One, 12);
+		Leds1.sendColors(&LBuffer, 12);
 
 		blinkLed.turnOff();
 		timer.sleep(BLINK_OFF_TICKS);
