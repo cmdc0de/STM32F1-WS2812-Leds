@@ -122,7 +122,7 @@ static union {
 		uint8_t begin[LED_PER_HALF * 24];
 		uint8_t end[LED_PER_HALF * 24];
 	}__attribute__((packed));
-} led_dma;
+} LedDMA;
 
 cmdc0de::WS2818::WS2818(uint16_t ledPin, GPIO_TypeDef *ledPort, TIM_TypeDef *ledTimer,
 		DMA_Channel_TypeDef *ledDMAChannel, IRQn_Type irqt) :
@@ -199,26 +199,22 @@ void cmdc0de::WS2818::init() {
 	TIM_OCInitStructure.TIM_OutputState = TIM_OutputState_Disable;
 	TIM_OCInitStructure.TIM_OutputNState = TIM_OutputNState_Enable;
 	TIM_OCInitStructure.TIM_Pulse = 0;
-//	TIM_OCInitStructure.TIM_OCPolarity = TIM_OCPolarity_High;
-//	TIM_OCInitStructure.TIM_OCNPolarity = TIM_OCNPolarity_High;
-//	TIM_OCInitStructure.TIM_OCNIdleState = TIM_OCNIdleState_Set;
 	TIM_OC1Init(LedTimer, &TIM_OCInitStructure);
 
 	TIM_OC1PreloadConfig(LedTimer, TIM_OCPreload_Enable);
-
 	TIM_CtrlPWMOutputs(LedTimer, ENABLE);           // enable Timer 1
 
 	/* configure DMA */
 	/* DMA clock enable */
 	RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
 
-	/* DMA1 Channel2 Config */
+	/* DMA Config */
 	DMA_DeInit(LedDMAChannel);
 
-	DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t) &LedTimer->CCR1; //TIM1_CCR1_Address;	// physical address of Timer 3 CCR1
-	DMA_InitStructure.DMA_MemoryBaseAddr = (uint32_t) led_dma.buffer;		// this is the buffer memory
+	DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t) &LedTimer->CCR1;
+	DMA_InitStructure.DMA_MemoryBaseAddr = (uint32_t) LedDMA.buffer;		// this is the buffer memory
 	DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralDST;						// data shifted from memory to peripheral
-	DMA_InitStructure.DMA_BufferSize = sizeof(led_dma.buffer);
+	DMA_InitStructure.DMA_BufferSize = sizeof(LedDMA.buffer);
 	DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
 	DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;					// automatically increase buffer index
 	DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
@@ -229,7 +225,7 @@ void cmdc0de::WS2818::init() {
 
 	DMA_Init(LedDMAChannel, &DMA_InitStructure);
 
-	NVIC_InitStructure.NVIC_IRQChannel = Irqt;					//DMA1_Channel2_IRQn;
+	NVIC_InitStructure.NVIC_IRQChannel = Irqt;
 	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 9;
 	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
 	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
@@ -240,8 +236,6 @@ void cmdc0de::WS2818::init() {
 
 	/* TIM1 CC1 DMA Request enable */
 	TIM_DMACmd(LedTimer, TIM_DMA_CC1, ENABLE);
-
-	//vSemaphoreCreateBinary(allLedDone);
 
 }
 
@@ -264,9 +258,6 @@ void cmdc0de::WS2818::sendColors(LedBuffer *colorLeds, uint16_t len) {
 	if (len < 1)
 		return;
 
-	//Wait for previous transfer to be finished
-	//xSemaphoreTake(allLedDone, portMAX_DELAY);
-
 	// Set interrupt context ...
 	CurrentLed = 0;
 	TotalLeds = len;
@@ -276,26 +267,25 @@ void cmdc0de::WS2818::sendColors(LedBuffer *colorLeds, uint16_t len) {
 
 		for (i = 0; (i < LED_PER_HALF) && (CurrentLed < TotalLeds + 2); i++, CurrentLed++) {
 			if (CurrentLed < TotalLeds)
-				fillLed(led_dma.begin + (24 * i), ColorLeds->getLed(CurrentLed));
+				fillLed(LedDMA.begin + (24 * i), ColorLeds->getLed(CurrentLed));
 			else
-				bzero(led_dma.begin + (24 * i), 24);
+				bzero(LedDMA.begin + (24 * i), 24);
 		}
 
 		for (i = 0; (i < LED_PER_HALF) && (CurrentLed < TotalLeds + 2); i++, CurrentLed++) {
 			if (CurrentLed < TotalLeds)
-				fillLed(led_dma.end + (24 * i), ColorLeds->getLed(CurrentLed));
+				fillLed(LedDMA.end + (24 * i), ColorLeds->getLed(CurrentLed));
 			else
-				bzero(led_dma.end + (24 * i), 24);
+				bzero(LedDMA.end + (24 * i), 24);
 		}
 
-		LedDMAChannel->CNDTR = sizeof(led_dma.buffer); // load number of bytes to be transferred
+		LedDMAChannel->CNDTR = sizeof(LedDMA.buffer); // load number of bytes to be transferred
 		DMA_Cmd(LedDMAChannel, ENABLE); 			// enable DMA channel 2
 		TIM_Cmd(LedTimer, ENABLE);                      // Go!!!
 	}
 }
 
 void cmdc0de::WS2818::handleISR() {
-	//portBASE_TYPE xHigherPriorityTaskWoken;
 	uint8_t * buffer = 0;
 	int i = 0;
 
@@ -306,12 +296,12 @@ void cmdc0de::WS2818::handleISR() {
 
 	if (DMA_GetITStatus(DMA1_IT_HT2)) {
 		DMA_ClearITPendingBit(DMA1_IT_HT2);
-		buffer = led_dma.begin;
+		buffer = LedDMA.begin;
 	}
 
 	if (DMA_GetITStatus(DMA1_IT_TC2)) {
 		DMA_ClearITPendingBit(DMA1_IT_TC2);
-		buffer = led_dma.end;
+		buffer = LedDMA.end;
 	}
 
 	for (i = 0; (i < LED_PER_HALF) && (CurrentLed < TotalLeds + 2); i++, CurrentLed++) {
@@ -322,8 +312,6 @@ void cmdc0de::WS2818::handleISR() {
 	}
 
 	if (CurrentLed >= TotalLeds + 2) {
-		//xSemaphoreGiveFromISR(allLedDone, &xHigherPriorityTaskWoken);
-
 		TIM_Cmd(LedTimer, DISABLE); 					// disable Timer
 		DMA_Cmd(LedDMAChannel, DISABLE); 				// disable DMA channel
 		TotalLeds = 0;
