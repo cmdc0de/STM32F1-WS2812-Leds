@@ -70,7 +70,7 @@ main(int argc, char* argv[]) {
 			One[i * 3 + 1] = rand() % 256;
 			One[i * 3 + 2] = rand() % 256;
 		}
-		Leds1.sendColors(&LBuffer, 12);
+		Leds1.sendColors(&LBuffer, 50);
 
 		blinkLed.turnOn();
 		timer.sleep(seconds == 0 ? Timer::FREQUENCY_HZ : BLINK_ON_TICKS);

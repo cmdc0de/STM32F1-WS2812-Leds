@@ -36,20 +36,42 @@ public:
 class LedBuffer {
 public:
 	LedBuffer(uint8_t *ledColorBuffer, uint32_t NUM_LEDS) :
-			LockAddr(0), LedData(ledColorBuffer), NumLeds(NUM_LEDS) {
+			LedData(ledColorBuffer), NumLeds(NUM_LEDS) {
 	}
 	~LedBuffer() {
 	}
-	bool tryAcquireLock();
-	bool setLedColors(uint8_t *leds, int trys);
-	bool releaseLock();
-	bool isLocked() {return LockAddr==1;}
 	uint8_t *getLeds() {return LedData;}
 	uint8_t *getLed(uint16_t led) {return &LedData[led*3];}
+	uint16_t getNumLeds() {return NumLeds;}
 private:
-	uint8_t LockAddr;
 	uint8_t *LedData;
 	uint16_t NumLeds;
+};
+
+template<typename T, uint8_t D>
+class Stack {
+public:
+	Stack() : StackMem(), InsertionPos(0) {}
+	~Stack() {}
+	bool push(T &v) {
+		bool bRetVal = false;
+		if(InsertionPos==(D)) {
+			return false;
+		}
+		StackMem[InsertionPos]=v;
+		InsertionPos++;
+		return true;
+	}
+	T &pop() {
+		if(InsertionPos==0) {
+			return 0;
+		} else {
+			return StackMem[--InsertionPos];
+		}
+	}
+protected:
+	T StackMem[D];
+	uint8_t InsertionPos;
 };
 
 /*
@@ -68,12 +90,12 @@ public:
 			IRQn_Type irqt);
 	void init();
 	//void sendColors(uint8_t (*color)[3], uint16_t len);
-	void sendColors(LedBuffer *ColorLeds, uint16_t len);
+	bool sendColors(LedBuffer *ColorLeds, uint32_t timeOut);
 	~WS2818();
 	void handleISR();
-	protected:
+protected:
 	void fillLed(uint8_t *buffer, uint8_t *color);
-	private:
+private:
 	TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
 	TIM_OCInitTypeDef TIM_OCInitStructure;
 	GPIO_InitTypeDef GPIO_InitStructure;
@@ -87,7 +109,6 @@ public:
 	int CurrentLed;
 	int TotalLeds;
 	LedBuffer *ColorLeds;
-	//uint8_t (*ColorLed)[3];
 };
 
 } //cmdc0de

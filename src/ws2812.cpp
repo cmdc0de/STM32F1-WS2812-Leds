@@ -36,76 +36,6 @@ RGB RGB::createRandomColor() {
 	return RGB(rand() % 256, rand() % 256, rand() % 256);
 }
 
-#define WITH_NO_LOCK
-// Synchronization primitives
-// http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.dui0552a/BABHCIHB.html
-//
-// LDREX and STREX
-// http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.dui0552a/BABFFBJB.html
-//
-// In what situations might I need to insert memory barrier instructions?
-// http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.faqs/ka14041.html
-bool LedBuffer::tryAcquireLock() {
-#ifdef WITH_NO_LOCK
-	return true;
-#else
-	volatile unsigned char success = 1;
-	asm(
-			"          PUSH     {R3-R4}        \n"//; save state\n"
-			"          MOV      R4, #1          \n"//; Initialize the ‘lock taken’ value\n"
-
-			"          MOV      R3, #1          \n"//; initialize success false\n"
-			"          STRB     R3, [%[Rs]]     \n"
-			"          LDREXB   R3, [%[Rl]]     \n"//; Load the lock value\n"
-			"          CMP      R3, #0          \n"//; Is the lock free?\n"
-
-			"          ITT      EQ              \n"//; IF ( EQUAL ) THEN { STREX, CMP, DMB } ELSE { MOV }\n"
-			"          STREXBEQ   R3, R4, [%[Rl]] \n"//; Try and claim the lock\n"
-			"          CMPEQ    R3, #0          \n"//; Did this succeed?\n"
-			"          DMB                      \n"//; data memory barrier before accessing restricted resource\n"
-			"          MOV      R3, #1          \n"//; we failed to begin with\n"
-
-			"          STRB     R3, [%[Rs]]     \n"
-			"          POP      {R3-R4}         "//; restore state\n"
-			:: [Rs]"r"(&success), [Rl]"r"(&LockAddr) : "memory" );
-
-	return success == 0;
-#endif
-}
-
-bool LedBuffer::setLedColors(uint8_t *leds, int trys) {
-	bool gotLock = false;
-	while((--trys)>=0) {
-		if((gotLock=tryAcquireLock())) {
-			break;
-		}
-	}
-
-	if(gotLock) {
-		LedData = leds;
-		releaseLock();
-	}
-	return gotLock;
-}
-
-bool LedBuffer::releaseLock() {
-#ifdef WITH_NO_LOCK
-	return true;
-#else
-	volatile unsigned char success = 1;
-	asm (
-			"          PUSH       {R3}            \n"
-			"          MOV        R3, #0          \n"
-			"          STRB       R3, [%[Rs]]     \n" //; this call will always succeed\n"
-			"          STRB       R3, [%[Rl]]     \n" //; unlock mutex\n"
-			"          POP        {R3}            \n"
-			"          DMB                        \n"//; data memory barrier\n"
-			"          DSB                        \n"//; data synchronization barrier\n"
-			:: [Rs]"r"(&success), [Rl]"r"(&LockAddr) : "memory" );
-	return success == 0;
-#endif;
-}
-
 // The minimum is to have 2 leds (1 per half buffer) in the buffer, this
 // consume 42Bytes and will trigger the DMA interrupt at ~2KHz.
 // Putting 2 there will divide by 2 the interrupt frequency but will also
@@ -252,37 +182,44 @@ void cmdc0de::WS2818::fillLed(uint8_t *buffer, uint8_t *color) {
 	}
 }
 
+void delay(uint32_t ms) {
+	while(--ms>0);
+}
+
 //void cmdc0de::WS2818::sendColors(uint8_t (*color)[3], uint16_t len) {
-void cmdc0de::WS2818::sendColors(LedBuffer *colorLeds, uint16_t len) {
+//void cmdc0de::WS2818::sendColors(LedBuffer *colorLeds, uint16_t len) {
+bool cmdc0de::WS2818::sendColors(LedBuffer *colorLeds, uint32_t timeOut) {
 	int i = 0;
-	if (len < 1)
-		return;
+	if (colorLeds->getNumLeds() < 1)
+		return false;
+
+	if(ColorLeds!=0) {
+		while(ColorLeds!=0 && timeOut--);
+		if(timeOut==0) return false;
+	}
 
 	// Set interrupt context ...
 	CurrentLed = 0;
-	TotalLeds = len;
+	TotalLeds = colorLeds->getNumLeds();
 	ColorLeds = colorLeds;
 
-	if(ColorLeds->tryAcquireLock()) {
-
-		for (i = 0; (i < LED_PER_HALF) && (CurrentLed < TotalLeds + 2); i++, CurrentLed++) {
-			if (CurrentLed < TotalLeds)
-				fillLed(LedDMA.begin + (24 * i), ColorLeds->getLed(CurrentLed));
-			else
-				bzero(LedDMA.begin + (24 * i), 24);
-		}
-
-		for (i = 0; (i < LED_PER_HALF) && (CurrentLed < TotalLeds + 2); i++, CurrentLed++) {
-			if (CurrentLed < TotalLeds)
-				fillLed(LedDMA.end + (24 * i), ColorLeds->getLed(CurrentLed));
-			else
-				bzero(LedDMA.end + (24 * i), 24);
-		}
-
-		LedDMAChannel->CNDTR = sizeof(LedDMA.buffer); // load number of bytes to be transferred
-		DMA_Cmd(LedDMAChannel, ENABLE); 			// enable DMA channel 2
-		TIM_Cmd(LedTimer, ENABLE);                      // Go!!!
+	for (i = 0; (i < LED_PER_HALF) && (CurrentLed < TotalLeds + 2); i++, CurrentLed++) {
+		if (CurrentLed < TotalLeds)
+			fillLed(LedDMA.begin + (24 * i), ColorLeds->getLed(CurrentLed));
+		else
+			bzero(LedDMA.begin + (24 * i), 24);
 	}
+
+	for (i = 0; (i < LED_PER_HALF) && (CurrentLed < TotalLeds + 2); i++, CurrentLed++) {
+		if (CurrentLed < TotalLeds)
+			fillLed(LedDMA.end + (24 * i), ColorLeds->getLed(CurrentLed));
+		else
+			bzero(LedDMA.end + (24 * i), 24);
+	}
+
+	LedDMAChannel->CNDTR = sizeof(LedDMA.buffer); // load number of bytes to be transferred
+	DMA_Cmd(LedDMAChannel, ENABLE); 			// enable DMA channel 2
+	TIM_Cmd(LedTimer, ENABLE);                      // Go!!!
 }
 
 void cmdc0de::WS2818::handleISR() {
@@ -314,6 +251,7 @@ void cmdc0de::WS2818::handleISR() {
 	if (CurrentLed >= TotalLeds + 2) {
 		TIM_Cmd(LedTimer, DISABLE); 					// disable Timer
 		DMA_Cmd(LedDMAChannel, DISABLE); 				// disable DMA channel
+		ColorLeds=0;
 		TotalLeds = 0;
 	}
 }
