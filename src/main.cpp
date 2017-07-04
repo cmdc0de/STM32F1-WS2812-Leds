@@ -11,6 +11,7 @@
 
 #include "Timer.h"
 #include "BlinkLed.h"
+#define LED_PER_DMA_BUFFER 32
 #include "ws2812.h"
 
 // Definitions visible only within this translation unit.
@@ -32,9 +33,10 @@ constexpr Timer::ticks_t BLINK_OFF_TICKS = 100; //Timer::FREQUENCY_HZ- BLINK_ON_
 #pragma GCC diagnostic ignored "-Wmissing-declarations"
 #pragma GCC diagnostic ignored "-Wreturn-type"
 
-uint8_t One[36];
+#define NUMLEDS 64
+uint8_t One[NUMLEDS*3];
 cmdc0de::WS2818 Leds1(GPIO_Pin_7, GPIOA, TIM1, DMA1_Channel2, DMA1_Channel2_IRQn);
-cmdc0de::LedBuffer LBuffer(&One[0], 12);
+cmdc0de::LedBuffer LBuffer(&One[0], NUMLEDS);
 
 extern "C" {
 void DMA1_Channel2_IRQHandler() {
@@ -65,7 +67,7 @@ main(int argc, char* argv[]) {
 	while (1)
 	{
 
-		for (int i = 0; i < 12; i++) {
+		for (int i = 0; i < LBuffer.getNumLeds(); i++) {
 			One[i * 3] = rand() % 256;
 			One[i * 3 + 1] = rand() % 256;
 			One[i * 3 + 2] = rand() % 256;
@@ -75,7 +77,7 @@ main(int argc, char* argv[]) {
 		blinkLed.turnOn();
 		timer.sleep(seconds == 0 ? Timer::FREQUENCY_HZ : BLINK_ON_TICKS);
 
-		for (int i = 0; i < 12; i++) {
+		for (int i = 0; i < LBuffer.getNumLeds(); i++) {
 			One[i * 3] = rand() % 256;
 			One[i * 3 + 1] = rand() % 256;
 			One[i * 3 + 2] = rand() % 256;
